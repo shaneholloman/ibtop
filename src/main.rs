@@ -28,11 +28,12 @@ fn get_hostname() -> String {
 fn main() -> Result<(), io::Error> {
     let args: Vec<String> = env::args().collect();
     let json_mode = args.contains(&String::from("--json"));
+    let use_bits = args.contains(&String::from("--bits"));
 
     if json_mode {
         run_json_mode()
     } else {
-        run_interactive_mode()
+        run_interactive_mode(use_bits)
     }
 }
 
@@ -60,14 +61,14 @@ fn run_json_mode() -> Result<(), io::Error> {
     Ok(())
 }
 
-fn run_interactive_mode() -> Result<(), io::Error> {
+fn run_interactive_mode(use_bits: bool) -> Result<(), io::Error> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let res = run_app(&mut terminal);
+    let res = run_app(&mut terminal, use_bits);
 
     disable_raw_mode()?;
     execute!(
@@ -84,10 +85,14 @@ fn run_interactive_mode() -> Result<(), io::Error> {
     Ok(())
 }
 
-fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
+fn run_app<B: ratatui::backend::Backend>(
+    terminal: &mut Terminal<B>,
+    use_bits: bool,
+) -> io::Result<()> {
     let use_fake_data = std::env::var("IBTOP_FAKE_DATA").is_ok();
     let mut metrics = metrics::MetricsCollector::new();
     let mut app_state = ui::AppState::new();
+    app_state.use_bits = use_bits;
     let hostname = get_hostname();
 
     let ui_refresh_duration = Duration::from_millis(UI_REFRESH_INTERVAL_MS);
@@ -131,10 +136,11 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
                     KeyCode::Char('j') | KeyCode::Down => app_state.select_next(),
                     KeyCode::Char('k') | KeyCode::Up => app_state.select_prev(),
 
-                    // Detail view
+                    // Detail view and display units
                     KeyCode::Enter => app_state.toggle_detail(),
                     KeyCode::Tab if app_state.detail_expanded => app_state.next_tab(),
                     KeyCode::BackTab if app_state.detail_expanded => app_state.prev_tab(),
+                    KeyCode::Char('b') => app_state.toggle_bits(),
 
                     // Force refresh
                     KeyCode::Char('r') => {

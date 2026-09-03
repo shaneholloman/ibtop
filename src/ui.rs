@@ -41,6 +41,8 @@ pub struct AppState {
     pub scroll_offset: usize,
     /// Animation frame counter
     pub frame_count: u64,
+    /// Display throughput in bits/sec instead of bytes/sec
+    pub use_bits: bool,
     /// List of selectable items (adapter, port) or None for adapter headers
     selectable_items: Vec<Option<(String, u16)>>,
 }
@@ -85,6 +87,11 @@ impl AppState {
     /// Toggle detail view
     pub fn toggle_detail(&mut self) {
         self.detail_expanded = !self.detail_expanded;
+    }
+
+    /// Toggle bits/sec vs bytes/sec throughput display
+    pub fn toggle_bits(&mut self) {
+        self.use_bits = !self.use_bits;
     }
 
     /// Get currently selected port
@@ -263,8 +270,8 @@ fn draw_main_table(
                 // Get throughput values
                 let (rx_rate, tx_rate) = if let Some(m) = port_metrics {
                     (
-                        format_bytes_per_sec(m.rx_bytes_per_sec),
-                        format_bytes_per_sec(m.tx_bytes_per_sec),
+                        format_throughput(m.rx_bytes_per_sec, state.use_bits),
+                        format_throughput(m.tx_bytes_per_sec, state.use_bits),
                     )
                 } else {
                     ("--".to_string(), "--".to_string())
@@ -368,12 +375,12 @@ fn draw_main_table(
                     Span::styled("  │  ", Style::default().fg(Color::DarkGray)),
                     Span::styled("▲ ", Style::default().fg(Color::Green)),
                     Span::styled(
-                        format_bytes_per_sec(total_rx),
+                        format_throughput(total_rx, state.use_bits),
                         Style::default().fg(Color::Green),
                     ),
                     Span::styled("  ▼ ", Style::default().fg(Color::Blue)),
                     Span::styled(
-                        format_bytes_per_sec(total_tx),
+                        format_throughput(total_tx, state.use_bits),
                         Style::default().fg(Color::Blue),
                     ),
                     Span::styled(" ", Style::default()),
@@ -384,6 +391,7 @@ fn draw_main_table(
     frame.render_widget(table, chunks[0]);
 
     // Help footer - context-sensitive
+    let bits_help = if state.use_bits { " bytes" } else { " bits" };
     let help_spans = if state.detail_expanded {
         vec![
             Span::styled(" ", Style::default().fg(Color::DarkGray)),
@@ -393,6 +401,9 @@ fn draw_main_table(
             Span::styled(" close  ", Style::default().fg(Color::DarkGray)),
             Span::styled("j/k", Style::default().fg(Color::Cyan)),
             Span::styled(" select port  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("b", Style::default().fg(Color::Cyan)),
+            Span::styled(bits_help, Style::default().fg(Color::DarkGray)),
+            Span::styled("  ", Style::default().fg(Color::DarkGray)),
             Span::styled("q", Style::default().fg(Color::Cyan)),
             Span::styled(" quit ", Style::default().fg(Color::DarkGray)),
         ]
@@ -403,6 +414,9 @@ fn draw_main_table(
             Span::styled(" navigate  ", Style::default().fg(Color::DarkGray)),
             Span::styled("Enter", Style::default().fg(Color::Cyan)),
             Span::styled(" details  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("b", Style::default().fg(Color::Cyan)),
+            Span::styled(bits_help, Style::default().fg(Color::DarkGray)),
+            Span::styled("  ", Style::default().fg(Color::DarkGray)),
             Span::styled("q", Style::default().fg(Color::Cyan)),
             Span::styled(" quit ", Style::default().fg(Color::DarkGray)),
         ]
@@ -497,12 +511,12 @@ fn draw_detail_panel(
             Span::styled("| ", Style::default().fg(Color::DarkGray)),
             Span::styled("RX: ", Style::default().fg(Color::DarkGray)),
             Span::styled(
-                format_bytes_per_sec(m.rx_bytes_per_sec),
+                format_throughput(m.rx_bytes_per_sec, state.use_bits),
                 Style::default().fg(Color::Blue),
             ),
             Span::styled(" TX: ", Style::default().fg(Color::DarkGray)),
             Span::styled(
-                format_bytes_per_sec(m.tx_bytes_per_sec),
+                format_throughput(m.tx_bytes_per_sec, state.use_bits),
                 Style::default().fg(Color::Magenta),
             ),
         ]);
@@ -513,35 +527,56 @@ fn draw_detail_panel(
 
     // Chart area
     if let Some(h) = history {
-        draw_chart(frame, detail_layout[2], h, state.detail_tab);
+        draw_chart(frame, detail_layout[2], h, state.detail_tab, state.use_bits);
     } else {
         let msg = Paragraph::new("Collecting data...").style(Style::default().fg(Color::DarkGray));
         frame.render_widget(msg, detail_layout[2]);
     }
 }
 
-/// Auto-scale throughput value and return scaled value with unit
-fn auto_scale_throughput(bytes_per_sec: f64) -> (f64, &'static str) {
-    if bytes_per_sec >= 1_000_000_000.0 {
-        (bytes_per_sec / 1_000_000_000.0, "GB/s")
-    } else if bytes_per_sec >= 1_000_000.0 {
-        (bytes_per_sec / 1_000_000.0, "MB/s")
-    } else if bytes_per_sec >= 1_000.0 {
-        (bytes_per_sec / 1_000.0, "KB/s")
+/// Auto-scale throughput value and return scaled value with unit.
+/// `rate` is bytes/sec when `use_bits` is false, or bits/sec when true.
+fn auto_scale_throughput(rate: f64, use_bits: bool) -> (f64, &'static str) {
+    if use_bits {
+        if rate >= 1_000_000_000_000.0 {
+            (rate / 1_000_000_000_000.0, "Tb/s")
+        } else if rate >= 1_000_000_000.0 {
+            (rate / 1_000_000_000.0, "Gb/s")
+        } else if rate >= 1_000_000.0 {
+            (rate / 1_000_000.0, "Mb/s")
+        } else if rate >= 1_000.0 {
+            (rate / 1_000.0, "Kb/s")
+        } else {
+            (rate, "b/s")
+        }
+    } else if rate >= 1_000_000_000.0 {
+        (rate / 1_000_000_000.0, "GB/s")
+    } else if rate >= 1_000_000.0 {
+        (rate / 1_000_000.0, "MB/s")
+    } else if rate >= 1_000.0 {
+        (rate / 1_000.0, "KB/s")
     } else {
-        (bytes_per_sec, "B/s")
+        (rate, "B/s")
     }
 }
 
 /// Draw a chart based on the selected tab
 #[allow(clippy::too_many_lines)]
-fn draw_chart(frame: &mut Frame, area: Rect, history: &PortHistory, tab: usize) {
+fn draw_chart(frame: &mut Frame, area: Rect, history: &PortHistory, tab: usize, use_bits: bool) {
     // First, find the max value to determine scale
     let (rx_raw, tx_raw): (Vec<f64>, Vec<f64>) = match tab {
-        0 => (
-            history.rx_bytes_per_sec.iter().copied().collect(),
-            history.tx_bytes_per_sec.iter().copied().collect(),
-        ),
+        0 => {
+            let rx: Vec<f64> = history.rx_bytes_per_sec.iter().copied().collect();
+            let tx: Vec<f64> = history.tx_bytes_per_sec.iter().copied().collect();
+            if use_bits {
+                (
+                    rx.into_iter().map(|v| v * 8.0).collect(),
+                    tx.into_iter().map(|v| v * 8.0).collect(),
+                )
+            } else {
+                (rx, tx)
+            }
+        }
         1 => (
             history.rx_packets_per_sec.iter().copied().collect(),
             history.tx_packets_per_sec.iter().copied().collect(),
@@ -566,12 +601,13 @@ fn draw_chart(frame: &mut Frame, area: Rect, history: &PortHistory, tab: usize) 
     // Determine scale and unit based on max value
     let (divisor, y_label) = match tab {
         0 => {
-            // Throughput - auto-scale
-            let (_, unit) = auto_scale_throughput(max_raw);
+            // Throughput - auto-scale (bytes or bits depending on mode)
+            let (_, unit) = auto_scale_throughput(max_raw, use_bits);
             let div = match unit {
-                "GB/s" => 1_000_000_000.0,
-                "MB/s" => 1_000_000.0,
-                "KB/s" => 1_000.0,
+                "TB/s" | "Tb/s" => 1_000_000_000_000.0,
+                "GB/s" | "Gb/s" => 1_000_000_000.0,
+                "MB/s" | "Mb/s" => 1_000_000.0,
+                "KB/s" | "Kb/s" => 1_000.0,
                 _ => 1.0,
             };
             (div, unit)
@@ -755,6 +791,33 @@ pub fn format_bytes_per_sec(bytes_per_sec: f64) -> String {
     }
 }
 
+/// Format a bit-rate using SI decimal units (network convention).
+pub fn format_bits_per_sec(bits_per_sec: f64) -> String {
+    const UNITS: &[&str] = &["b/s", "Kb/s", "Mb/s", "Gb/s", "Tb/s"];
+    let mut value = bits_per_sec;
+    let mut unit_index = 0;
+
+    while value >= 1000.0 && unit_index < UNITS.len() - 1 {
+        value /= 1000.0;
+        unit_index += 1;
+    }
+
+    if value < 0.1 {
+        format!("{:.2}{}", value, UNITS[unit_index])
+    } else {
+        format!("{:.1}{}", value, UNITS[unit_index])
+    }
+}
+
+/// Format throughput as bytes/sec or bits/sec depending on `use_bits`.
+pub fn format_throughput(bytes_per_sec: f64, use_bits: bool) -> String {
+    if use_bits {
+        format_bits_per_sec(bytes_per_sec * 8.0)
+    } else {
+        format_bytes_per_sec(bytes_per_sec)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -783,6 +846,34 @@ mod tests {
             format_bytes_per_sec(1024.0 * 1024.0 * 1024.0 * 1024.0),
             "1.0TB/s"
         );
+    }
+
+    #[test]
+    fn test_format_bits_per_sec() {
+        assert_eq!(format_bits_per_sec(0.0), "0.00b/s");
+        assert_eq!(format_bits_per_sec(999.0), "999.0b/s");
+        assert_eq!(format_bits_per_sec(1000.0), "1.0Kb/s");
+        assert_eq!(format_bits_per_sec(1_000_000.0), "1.0Mb/s");
+        assert_eq!(format_bits_per_sec(1_000_000_000.0), "1.0Gb/s");
+        assert_eq!(format_bits_per_sec(100_000_000_000.0), "100.0Gb/s");
+        assert_eq!(format_bits_per_sec(1_000_000_000_000.0), "1.0Tb/s");
+    }
+
+    #[test]
+    fn test_format_throughput_bits_mode() {
+        // 12.5 GB/s bytes == 100 Gb/s bits
+        assert_eq!(format_throughput(12_500_000_000.0, true), "100.0Gb/s");
+        assert_eq!(format_throughput(12_500_000_000.0, false), "11.6GB/s");
+    }
+
+    #[test]
+    fn test_toggle_bits() {
+        let mut state = AppState::new();
+        assert!(!state.use_bits);
+        state.toggle_bits();
+        assert!(state.use_bits);
+        state.toggle_bits();
+        assert!(!state.use_bits);
     }
 
     #[test]

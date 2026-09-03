@@ -53,11 +53,19 @@ sudo cp target/release/ibtop /usr/local/bin/
 ```bash
 # Monitor all InfiniBand adapters
 ibtop
+
+# Start with throughput shown in bits/sec
+ibtop --bits
 ```
 
 ### Controls
 
 - `q` or `ESC` - Quit
+- `j` / `k` or arrow keys - Navigate ports
+- `Enter` - Toggle detail view
+- `b` - Toggle bits/sec vs bytes/sec throughput
+- `Tab` / `Shift+Tab` - Switch detail tabs (when detail view is open)
+- `r` - Force refresh
 
 ## Requirements
 
